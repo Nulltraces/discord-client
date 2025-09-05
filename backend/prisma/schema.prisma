@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  username     String   @unique
+  avatarUrl    String?
+  status       Status   @default(OFFLINE)
+
+  memberships  ServerMember[]
+  messages     Message[]
+  ownedServers Server[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Server {
+  id         String         @id @default(uuid())
+  name       String
+  ownerId    String
+  owner      User           @relation(fields: [ownerId], references: [id])
+  inviteCode String?        @unique
+  channels   Channel[]
+  members    ServerMember[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model Channel {
+  id        String    @id @default(uuid())
+  name      String
+  type      ChannelType @default(TEXT)
+  serverId  String
+  server    Server    @relation(fields: [serverId], references: [id])
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ServerMember {
+  userId   String
+  serverId String
+  role     Role      @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  server Server @relation(fields: [serverId], references: [id])
+
+  @@id([userId, serverId])
+}
+
+enum Status {
+  ONLINE
+  OFFLINE
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
