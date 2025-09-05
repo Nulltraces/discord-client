@@ -1,6 +1,11 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
+
+# Ensure system certs and openssl are present
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 
 # Ensure Prisma schema exists before npm install triggers postinstall (prisma generate)
 COPY prisma ./prisma
