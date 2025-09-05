@@ -18,6 +18,7 @@ export default function ChatView() {
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
   const socketRef = useRef<Socket | null>(null);
 
   const accessToken = useMemo(() => localStorage.getItem('accessToken') || '', []);
@@ -35,6 +36,18 @@ export default function ChatView() {
     });
     s.on('message:deleted', ({ messageId }: { messageId: string }) => {
       setMessages(prev => prev.filter(m => m.id !== messageId));
+    });
+    s.on('presence:update', ({ userId, status }: { userId: string; status: string }) => {
+      setOnlineUsers(prev => {
+        if (status === 'ONLINE') {
+          if (prev.find(u => u.id === userId)) return prev;
+          // We don't know username here; refetch list for accuracy
+          api.get(`/presence/online`).then(({ data }) => setOnlineUsers(data));
+          return prev;
+        } else {
+          return prev.filter(u => u.id !== userId);
+        }
+      });
     });
     return () => { s.disconnect(); };
   }, [accessToken]);
@@ -60,10 +73,60 @@ export default function ChatView() {
     api.get(`/messages/${currentChannel.id}`).then(({ data }) => setMessages(data));
   }, [currentChannel, accessToken]);
 
+  useEffect(() => {
+    api.get(`/presence/online`).then(({ data }) => setOnlineUsers(data));
+  }, [accessToken]);
+
   function sendMessage() {
     if (!input.trim() || !socketRef.current || !currentChannel) return;
     socketRef.current.emit('message:send', { channelId: currentChannel.id, content: input });
     setInput('');
+  }
+
+  async function createServer() {
+    const name = prompt('Server name');
+    if (!name) return;
+    const { data } = await api.post(`/servers`, { name });
+    setServers(prev => [...prev, data]);
+    setCurrentServer(data);
+  }
+
+  async function joinServer() {
+    const inviteCode = prompt('Invite code');
+    if (!inviteCode) return;
+    const { data } = await api.post(`/servers/join`, { inviteCode });
+    if (!servers.find(s => s.id === data.id)) setServers(prev => [...prev, data]);
+    setCurrentServer(data);
+  }
+
+  async function leaveServer() {
+    if (!currentServer) return;
+    await api.post(`/servers/${currentServer.id}/leave`);
+    const remaining = servers.filter(s => s.id !== currentServer.id);
+    setServers(remaining);
+    setCurrentServer(remaining[0] || null);
+  }
+
+  async function showInvite() {
+    if (!currentServer) return;
+    try {
+      const { data } = await api.get(`/servers/${currentServer.id}/invite`);
+      if (data?.inviteCode) {
+        navigator.clipboard?.writeText(data.inviteCode);
+        alert(`Invite code copied: ${data.inviteCode}`);
+      } else {
+        alert('No invite code or not permitted');
+      }
+    } catch {
+      alert('Failed to get invite');
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+    location.reload();
   }
 
   function editMessage(messageId: string, content: string) {
@@ -90,7 +153,16 @@ export default function ChatView() {
         ))}
       </aside>
       <section className="flex-1 flex flex-col">
-        <header className="h-12 border-b border-neutral-700 flex items-center px-4"># {currentChannel?.name}</header>
+        <header className="h-12 border-b border-neutral-700 flex items-center justify-between px-4">
+          <div># {currentChannel?.name}</div>
+          <div className="flex gap-2">
+            <button className="px-2 py-1 text-xs bg-neutral-700 rounded" onClick={createServer}>Create</button>
+            <button className="px-2 py-1 text-xs bg-neutral-700 rounded" onClick={joinServer}>Join</button>
+            <button className="px-2 py-1 text-xs bg-neutral-700 rounded" onClick={leaveServer} disabled={!currentServer}>Leave</button>
+            <button className="px-2 py-1 text-xs bg-neutral-700 rounded" onClick={showInvite} disabled={!currentServer}>Invite</button>
+            <button className="px-2 py-1 text-xs bg-red-700 rounded" onClick={logout}>Logout</button>
+          </div>
+        </header>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map(m => (
             <div key={m.id} className="group flex items-start gap-3">
@@ -118,6 +190,12 @@ export default function ChatView() {
           <button onClick={sendMessage} className="px-4 py-2 bg-indigo-600 rounded">Send</button>
         </footer>
       </section>
+      <aside className="w-56 bg-neutral-800 p-3 space-y-1 border-l border-neutral-700">
+        <div className="font-semibold mb-2">Online</div>
+        {onlineUsers.map(u => (
+          <div key={u.id} className="px-2 py-1 rounded bg-neutral-700/50">{u.username}</div>
+        ))}
+      </aside>
     </div>
   );
 }
